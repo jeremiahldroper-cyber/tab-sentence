@@ -795,7 +795,7 @@ export default function App() {
 function makeStyles(T) {
   return StyleSheet.create({
     safe:      { flex: 1 },
-    container: { flex: 1, padding: 18, backgroundColor: T.bg },
+    container: { flex: 1, padding: 18, paddingBottom: 34, backgroundColor: T.bg },
 
     header: {
       flexDirection: "row",
