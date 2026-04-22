@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tab Sentence",
     "slug": "tab-sentence",
-    "version": "1.0.1",
+    "version": "2.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
