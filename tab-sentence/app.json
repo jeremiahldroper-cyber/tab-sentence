@@ -20,9 +20,6 @@
       },
       "permissions": []
     },
-    "plugins": [
-      "expo-clipboard"
-    ],
     "extra": {
       "eas": {
         "projectId": "09a8796f-0d40-4779-94be-e15b34914c5a"
