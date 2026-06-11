@@ -536,7 +536,28 @@ const [chordBuffer, setChordBuffer] = useState(""); // building chord content
   setChordBuffer("");
   setPendingString(null);
 }, [chordMode, chordBuffer, insertToken]);
-
+  
+const handleFretBtn = useCallback((fret) => {
+  if (chordMode) {
+    if (!pendingString) return;
+    const label = labelsMap[pendingString] || pendingString[0];
+    setChordBuffer(prev => prev + label + fret);
+    setPendingString(null);
+    return;
+  }
+  const activeString = pendingString || lastString;
+  if (!activeString) {
+    insertToken(fret);
+    return;
+  }
+  const label = labelsMap[activeString] || activeString[0];
+  const token = pendingStyle + label + fret;
+  insertToken(token);
+  setPendingStyle("");
+  setPendingString(null);
+  setLastString(activeString);
+}, [chordMode, pendingString, lastString, pendingStyle, labelsMap, insertToken]);
+  
   // ── Clipboard / Share ─────────────────────────────────────────────────────
   const flashMsg = (msg) => { setCopyMsg(msg); setTimeout(() => setCopyMsg(""), 2000); };
 
