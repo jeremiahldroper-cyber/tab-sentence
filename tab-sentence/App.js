@@ -722,17 +722,18 @@ const [chordBuffer, setChordBuffer] = useState(""); // building chord content
       <View style={s.card}>
         <View style={s.cardRow}>
           <Text style={[s.cardLabel, { color: T.text }]}>👁 Tab Preview</Text>
-          <View style={{ flexDirection: "row", gap: 6 }}>
-  <TouchableOpacity onPress={() => setPreviewExpanded(e => !e)} style={s.iconActionBtn}>
-    <Text style={[s.iconActionTxt, { color: T.textSecond }]}>{previewExpanded ? "⬆" : "⬇"}</Text>
-  </TouchableOpacity>
-  <TouchableOpacity onPress={() => { setSaveName(""); setSaveNotes(""); setShowSaveModal(true); }} style={[s.iconActionBtn, { borderWidth: 1, borderColor: T.border, borderRadius: 6, paddingHorizontal: 8 }]}>
-    <Text style={[s.iconActionTxt, { color: T.amber, fontSize: 11, fontWeight: "700" }]}>SAVE</Text>
-  </TouchableOpacity>
-  <TouchableOpacity onPress={copyToClipboard} style={[s.iconActionBtn, { borderWidth: 1, borderColor: T.border, borderRadius: 6, paddingHorizontal: 8 }]}>
-    <Text style={[s.iconActionTxt, { color: T.amber, fontSize: 11, fontWeight: "700" }]}>{copyMsg || "COPY"}</Text>
-  </TouchableOpacity>
-</View>
+         <View style={{ flexDirection: "row", gap: 6 }}>
+            <TouchableOpacity onPress={() => setPreviewExpanded(e => !e)} style={s.iconActionBtn}>
+              <Text style={[s.iconActionTxt, { color: T.textSecond }]}>{previewExpanded ? "⬆" : "⬇"}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setSaveName(""); setSaveNotes(""); setShowSaveModal(true); }} style={[s.iconActionBtn, { borderWidth: 1, borderColor: T.border, borderRadius: 6, paddingHorizontal: 8 }]}>
+              <Text style={[s.iconActionTxt, { color: T.amber, fontSize: 11, fontWeight: "700" }]}>SAVE</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={copyToClipboard} style={[s.iconActionBtn, { borderWidth: 1, borderColor: T.border, borderRadius: 6, paddingHorizontal: 8 }]}>
+              <Text style={[s.iconActionTxt, { color: T.amber, fontSize: 11, fontWeight: "700" }]}>{copyMsg || "COPY"}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         <ScrollView
           style={[s.previewBox, previewExpanded && s.previewBoxExpanded]}
