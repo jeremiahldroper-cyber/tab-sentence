@@ -421,9 +421,12 @@ export default function App() {
   const inputRef = useRef(null);
   const [selection, setSelection]       = useState({ start: 0, end: 0 });
 
-  // Button input state
-  const [pendingStyle, setPendingStyle] = useState("");  // pending style prefix
-  const [pendingString, setPendingString] = useState(null); // pending string key
+// Button input state
+const [pendingStyle, setPendingStyle] = useState("");
+const [pendingString, setPendingString] = useState(null);
+const [lastString, setLastString] = useState(null); // Option A chain memory
+const [chordMode, setChordMode] = useState(false);  // chord mode active
+const [chordBuffer, setChordBuffer] = useState(""); // building chord content
 
   // Navigation: 0=Studio, 1=Library, 2=Glossary
   const [activeTab, setActiveTab]       = useState(0);
@@ -487,44 +490,52 @@ export default function App() {
   // ── Button handlers ───────────────────────────────────────────────────────
 
   const handleStyleBtn = useCallback((token) => {
-    if (token === "-") {
-      // Dash always inserts immediately and clears pending state
-      setPendingStyle("");
-      setPendingString(null);
-      insertToken("-");
-    } else if (token === "(" || token === ")") {
-      setPendingStyle("");
-      setPendingString(null);
-      insertToken(token);
-    } else {
-      // Style prefix — store, wait for string
-      setPendingStyle(prev => prev === token ? "" : token);
-      setPendingString(null);
-    }
-  }, [insertToken]);
+  if (chordMode) return; // blocked in chord mode
 
-  const handleStringBtn = useCallback((stringKey) => {
-    if (pendingString === stringKey) {
-      // Deselect
-      setPendingString(null);
-    } else {
-      setPendingString(stringKey);
-    }
-    // Style prefix carries over, don't clear it
-  }, [pendingString]);
-
-  const handleFretBtn = useCallback((fret) => {
-    if (!pendingString) {
-      // No string selected — just insert the number
-      insertToken(fret);
-      return;
-    }
-    const label = labelsMap[pendingString] || pendingString[0];
-    const token = pendingStyle + label + fret;
-    insertToken(token);
+  if (token === "(") {
+    setChordMode(true);
+    setChordBuffer("");
     setPendingStyle("");
     setPendingString(null);
-  }, [pendingString, pendingStyle, labelsMap, insertToken]);
+    return;
+  }
+  if (token === ")") {
+    // Should not appear as active in chord mode, but safety catch
+    return;
+  }
+  if (token === "-") {
+    setPendingStyle("");
+    setPendingString(null);
+    setLastString(null); // dash clears chain memory
+    insertToken("-");
+    return;
+  }
+  // Style prefix — toggle
+  setPendingStyle(prev => prev === token ? "" : token);
+  setPendingString(null);
+}, [chordMode, insertToken]);
+
+  const handleStringBtn = useCallback((stringKey) => {
+  if (chordMode) {
+    // In chord mode, selecting a string just sets pending for fret
+    setPendingString(stringKey);
+    return;
+  }
+  if (pendingString === stringKey) {
+    setPendingString(null);
+  } else {
+    setPendingString(stringKey);
+  }
+}, [chordMode, pendingString]);
+
+ const handleChordClose = useCallback(() => {
+  if (!chordMode) return;
+  const token = "(" + chordBuffer + ")";
+  insertToken(token);
+  setChordMode(false);
+  setChordBuffer("");
+  setPendingString(null);
+}, [chordMode, chordBuffer, insertToken]);
 
   // ── Clipboard / Share ─────────────────────────────────────────────────────
   const flashMsg = (msg) => { setCopyMsg(msg); setTimeout(() => setCopyMsg(""), 2000); };
@@ -614,21 +625,41 @@ export default function App() {
         />
 
         {/* ── Style symbol row ── */}
-        <Text style={s.rowLabel}>Style:</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.btnRow}>
-          {STYLE_SYMBOLS.map(({ label, token }) => {
-            const isActive = pendingStyle === token && token !== "-" && token !== "(" && token !== ")";
-            return (
-              <TouchableOpacity
-                key={token + label}
-                style={[s.chipBtn, isActive && s.chipBtnActive]}
-                onPress={() => handleStyleBtn(token)}
-              >
-                <Text style={[s.chipTxt, isActive && s.chipTxtActive]}>{label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+       <Text style={s.rowLabel}>Style:</Text>
+<ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.btnRow}>
+  {/* Chord open — always first */}
+  <TouchableOpacity
+    style={[s.chipBtn, chordMode && s.chipBtnActive]}
+    onPress={() => handleStyleBtn("(")}
+    disabled={chordMode}
+  >
+    <Text style={[s.chipTxt, chordMode && s.chipTxtActive]}>(</Text>
+  </TouchableOpacity>
+
+  {/* Chord close — only active in chord mode */}
+  <TouchableOpacity
+    style={[s.chipBtn, chordMode && s.chipBtnActive]}
+    onPress={handleChordClose}
+    disabled={!chordMode}
+  >
+    <Text style={[s.chipTxt, chordMode && s.chipTxtActive]}>)</Text>
+  </TouchableOpacity>
+
+  {/* Other style buttons — disabled in chord mode */}
+  {STYLE_SYMBOLS.filter(s2 => s2.token !== "(" && s2.token !== ")").map(({ label, token }) => {
+    const isActive = pendingStyle === token;
+    return (
+      <TouchableOpacity
+        key={token + label}
+        style={[s.chipBtn, isActive && s.chipBtnActive, chordMode && { opacity: 0.3 }]}
+        onPress={() => handleStyleBtn(token)}
+        disabled={chordMode}
+      >
+        <Text style={[s.chipTxt, isActive && s.chipTxtActive]}>{label}</Text>
+      </TouchableOpacity>
+    );
+  })}
+</ScrollView>
 
         {/* ── String row ── */}
         <Text style={s.rowLabel}>Strings:</Text>
@@ -663,18 +694,28 @@ export default function App() {
         </ScrollView>
 
         {/* Pending indicator */}
-        {(pendingStyle || pendingString) ? (
-          <View style={s.pendingRow}>
-            <Text style={[s.pendingTxt, { color: T.amber }]}>
-              {pendingStyle ? `Style: "${pendingStyle}"  ` : ""}
-              {pendingString ? `String: "${labelsMap[pendingString] || pendingString}"  ` : ""}
-              → {pendingString ? "tap a fret" : "tap a string"}
-            </Text>
-            <TouchableOpacity onPress={() => { setPendingStyle(""); setPendingString(null); }}>
-              <Text style={{ color: T.red, fontSize: 12, fontWeight: "700" }}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
+      {chordMode ? (
+  <View style={s.pendingRow}>
+    <Text style={[s.pendingTxt, { color: T.green }]}>
+      🎵 Chord mode — building: ({chordBuffer})
+      {pendingString ? `  → tap fret for "${labelsMap[pendingString] || pendingString}"` : "  → tap a string"}
+    </Text>
+    <TouchableOpacity onPress={() => { setChordMode(false); setChordBuffer(""); setPendingString(null); }}>
+      <Text style={{ color: T.red, fontSize: 12, fontWeight: "700" }}>Cancel</Text>
+    </TouchableOpacity>
+  </View>
+) : (pendingStyle || pendingString) ? (
+  <View style={s.pendingRow}>
+    <Text style={[s.pendingTxt, { color: T.amber }]}>
+      {pendingStyle ? `Style: "${pendingStyle}"  ` : ""}
+      {pendingString ? `String: "${labelsMap[pendingString] || pendingString}"  ` : ""}
+      → {pendingString ? "tap a fret" : "tap a string"}
+    </Text>
+    <TouchableOpacity onPress={() => { setPendingStyle(""); setPendingString(null); }}>
+      <Text style={{ color: T.red, fontSize: 12, fontWeight: "700" }}>Cancel</Text>
+    </TouchableOpacity>
+  </View>
+) : null}
       </View>
 
       {/* ── Tab Preview card ── */}
@@ -682,20 +723,16 @@ export default function App() {
         <View style={s.cardRow}>
           <Text style={[s.cardLabel, { color: T.text }]}>👁 Tab Preview</Text>
           <View style={{ flexDirection: "row", gap: 6 }}>
-            <TouchableOpacity onPress={() => setPreviewExpanded(e => !e)} style={s.iconActionBtn}>
-              <Text style={[s.iconActionTxt, { color: T.textSecond }]}>{previewExpanded ? "⬆ Collapse" : "⬇ Expand"}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setSaveName(""); setSaveNotes(""); setShowSaveModal(true); }} style={s.iconActionBtn}>
-              <Text style={s.iconActionTxt}>💾</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={shareTab} style={s.iconActionBtn}>
-              <Text style={s.iconActionTxt}>↑</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={copyToClipboard} style={s.iconActionBtn}>
-              <Text style={s.iconActionTxt}>{copyMsg || "📋"}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+  <TouchableOpacity onPress={() => setPreviewExpanded(e => !e)} style={s.iconActionBtn}>
+    <Text style={[s.iconActionTxt, { color: T.textSecond }]}>{previewExpanded ? "⬆" : "⬇"}</Text>
+  </TouchableOpacity>
+  <TouchableOpacity onPress={() => { setSaveName(""); setSaveNotes(""); setShowSaveModal(true); }} style={[s.iconActionBtn, { borderWidth: 1, borderColor: T.border, borderRadius: 6, paddingHorizontal: 8 }]}>
+    <Text style={[s.iconActionTxt, { color: T.amber, fontSize: 11, fontWeight: "700" }]}>SAVE</Text>
+  </TouchableOpacity>
+  <TouchableOpacity onPress={copyToClipboard} style={[s.iconActionBtn, { borderWidth: 1, borderColor: T.border, borderRadius: 6, paddingHorizontal: 8 }]}>
+    <Text style={[s.iconActionTxt, { color: T.amber, fontSize: 11, fontWeight: "700" }]}>{copyMsg || "COPY"}</Text>
+  </TouchableOpacity>
+</View>
 
         <ScrollView
           style={[s.previewBox, previewExpanded && s.previewBoxExpanded]}
