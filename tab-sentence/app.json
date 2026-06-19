@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tab Sentence",
     "slug": "tab-sentence",
-    "version": "1.0.1",
+    "version": "2.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.jerry.tabsentence",
-      "versionCode": 2,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0aa966"
