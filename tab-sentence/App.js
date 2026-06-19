@@ -53,18 +53,19 @@ const PRESETS = {
 const PRESET_KEYS = Object.keys(PRESETS);
 
 const STYLE_SYMBOLS = [
-  { label: "-",   token: "-",   desc: "Blank beat / space" },
-  { label: "/",   token: "/",   desc: "Slide Up" },
-  { label: "\\",  token: "\\",  desc: "Slide Down" },
-  { label: "h",   token: "h",   desc: "Hammer-on" },
-  { label: "p",   token: "p",   desc: "Pull-off" },
-  { label: "~",   token: "~",   desc: "Vibrato" },
-  { label: "x",   token: "x",   desc: "Mute" },
-  { label: "^",   token: "^",   desc: "Trill" },
-  { label: "b",   token: "b",   desc: "Bend" },
-  { label: "(",   token: "(",   desc: "Chord open" },
-  { label: ")",   token: ")",   desc: "Chord close" },
+  { label: "(",   token: "(",   desc: "Chord open",                    suffix: false },
+  { label: ")",   token: ")",   desc: "Chord close",                   suffix: false },
+  { label: "-",   token: "-",   desc: "Blank beat / space",            suffix: false },
+  { label: "/",   token: "/",   desc: "Slide Up",                      suffix: false },
+  { label: "\\",  token: "\\",  desc: "Slide Down",                    suffix: false },
+  { label: "h",   token: "h",   desc: "Hammer-on",                     suffix: false },
+  { label: "p",   token: "p",   desc: "Pull-off",                      suffix: false },
+  { label: "~",   token: "~",   desc: "Vibrato",                       suffix: true  },
+  { label: "x",   token: "x",   desc: "Mute",                          suffix: true  },
+  { label: "^",   token: "^",   desc: "Bend",                          suffix: true  },
 ];
+const SUFFIX_SYMBOLS = ["~", "^"];
+const MUTE_SYMBOL = "x";
 
 const FRETS = ["0","1","2","3","4","5","6","7","8","9","10","11","12"];
 
@@ -202,7 +203,9 @@ function resolveString(label, strings, labelsMap) {
 function parseEvents(input, strings, labelsMap) {
   const events = [];
   let i = 0;
-  const n = input.length;
+const n = input.length;
+let safetyCounter = 0;
+const SAFETY_LIMIT = n * 10 + 1000;
 
   // Build sorted label list (longest first to avoid prefix issues)
   const labelsSorted = strings
@@ -210,13 +213,20 @@ function parseEvents(input, strings, labelsMap) {
     .sort((a, b) => b.label.length - a.label.length);
 
   function getMatchingString(pos) {
-    for (const { string, label } of labelsSorted) {
-      if (input.slice(pos, pos + label.length).toLowerCase() === label.toLowerCase()) {
-        return { string, labelLen: label.length };
-      }
+  // Exact case match first (respects e vs E differentiation)
+  for (const { string, label } of labelsSorted) {
+    if (input.slice(pos, pos + label.length) === label) {
+      return { string, labelLen: label.length };
     }
-    return null;
   }
+  // Case-insensitive fallback only if no exact match found
+  for (const { string, label } of labelsSorted) {
+    if (input.slice(pos, pos + label.length).toLowerCase() === label.toLowerCase()) {
+      return { string, labelLen: label.length };
+    }
+  }
+  return null;
+}
 
   function readFret(pos) {
     let j = pos;
@@ -227,21 +237,35 @@ function parseEvents(input, strings, labelsMap) {
   }
 
   function readTechniques(pos, fret) {
-    // Returns sequence of {op, fret} steps
-    const seq = [{ op: "", fret }];
-    let k = pos;
-    while (k < n) {
-      const op = input[k];
-      if (!"hp/~b\\^x".includes(op)) break;
-      if (op === "~" || op === "b") { seq.push({ op, fret: "" }); k++; continue; }
-      const { fret: f, end } = readFret(k + 1);
-      if (!f) break;
-      seq.push({ op, fret: f }); k = end;
+  const seq = [{ op: "", fret }];
+  let k = pos;
+  while (k < n) {
+    const op = input[k];
+    if (!"hp/~\\^x".includes(op)) break;
+    // Suffix symbols — attach to current fret, no following fret needed
+    if (op === "~" || op === "^") {
+      seq[seq.length - 1].fret += op;
+      k++; continue;
     }
-    return { seq, end: k };
+    // Mute after a note — attach to current fret
+    if (op === "x") {
+      seq[seq.length - 1].fret += op;
+      k++; continue;
+    }
+    // Prefix ops that need a following fret
+    const { fret: f, end } = readFret(k + 1);
+    if (!f) break;
+    seq.push({ op, fret: f }); k = end;
   }
+  return { seq, end: k };
+}
 
   while (i < n) {
+    safetyCounter++;
+    if (safetyCounter > SAFETY_LIMIT) {
+      console.warn("Parser safety limit hit — breaking to prevent freeze");
+      break;
+    }
     const ch = input[i];
     if (/\s/.test(ch)) { i++; continue; }
 
@@ -255,29 +279,45 @@ function parseEvents(input, strings, labelsMap) {
 
     // Chord
     if (ch === "(") {
-      let j = i + 1, buf = "";
-      while (j < n && input[j] !== ")") { buf += input[j]; j++; }
-      i = j + 1;
-      const notes = [];
-      let ci = 0;
-      while (ci < buf.length) {
-        if (/\s/.test(buf[ci])) { ci++; continue; }
-        // Try to match a string label
-        let matched = null;
-        for (const { string, label } of labelsSorted) {
-          if (buf.slice(ci, ci + label.length).toLowerCase() === label.toLowerCase()) {
-            matched = { string, labelLen: label.length }; break;
-          }
-        }
-        if (matched) {
-          ci += matched.labelLen;
-          const { fret, end } = readFret(ci);
-          ci = end;
-          notes.push({ string: matched.string, fret });
-        } else { ci++; }
+  let j = i + 1, buf = "";
+  while (j < n && input[j] !== ")") { buf += input[j]; j++; }
+  i = j + 1;
+  const notes = [];
+  let ci = 0;
+  while (ci < buf.length) {
+    if (/\s/.test(buf[ci])) { ci++; continue; }
+    // Try to match a string label — longest first
+    let matched = null;
+    for (const { string, label } of labelsSorted) {
+      if (buf.slice(ci, ci + label.length) === label) {
+        matched = { string, labelLen: label.length }; break;
       }
-      events.push({ type: "chord", notes }); continue;
     }
+    // Case-insensitive fallback
+    if (!matched) {
+      for (const { string, label } of labelsSorted) {
+        if (buf.slice(ci, ci + label.length).toLowerCase() === label.toLowerCase()) {
+          matched = { string, labelLen: label.length }; break;
+        }
+      }
+    }
+    if (matched) {
+      ci += matched.labelLen;
+      // Read fret
+      let fret = "";
+      if (ci < buf.length && buf[ci] === "x") {
+        fret = "x"; ci++;
+      } else {
+        while (ci < buf.length && /[0-9]/.test(buf[ci])) { fret += buf[ci]; ci++; }
+      }
+      // Read suffix symbols
+      let suffix = "";
+      while (ci < buf.length && "~^".includes(buf[ci])) { suffix += buf[ci]; ci++; }
+      notes.push({ string: matched.string, fret: fret + suffix });
+    } else { ci++; }
+  }
+  events.push({ type: "chord", notes }); continue;
+}
 
     // Style prefix before a string
     let stylePrefix = "";
@@ -385,18 +425,17 @@ function buildTabLines(text, strings, labelsMap, wrapAt) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const GLOSSARY = [
-  { sym: "E5",    desc: "Play string E on fret 5. Type the string label then the fret number." },
-  { sym: "()",    desc: "Chord — wrap notes played together. e.g. (G2B3e2) strums all three strings simultaneously." },
-  { sym: "-",     desc: "Space or beat separator. Adds blank column width between notes." },
-  { sym: "/",     desc: "Slide Up — shift to a higher pitch. e.g. G2/5" },
-  { sym: "\\",    desc: "Slide Down — shift to a lower pitch. e.g. G5\\2" },
-  { sym: "h",     desc: "Hammer-on — fret note with a tap-down motion. e.g. E1h2" },
-  { sym: "p",     desc: "Pull-off — fret note by pulling the finger away. e.g. E2p1" },
-  { sym: "~",     desc: "Vibrato — shake string for pitch variation. e.g. A2~" },
-  { sym: "x",     desc: "Dead note — muted string strike. e.g. Ax" },
-  { sym: "^",     desc: "Trill — rapid hammer/pull alternation. e.g. E1^3" },
-  { sym: "b",     desc: "Bend — push string to raise pitch. e.g. A7b" },
-  { sym: "Prefix",desc: "Style symbols before a note apply to that note. e.g. hE2 = hammer onto E string fret 2. The - clears any pending prefix." },
+  { sym: "E5",     desc: "Play string E on fret 5. Type the string label then the fret number." },
+  { sym: "()",     desc: "Chord — wrap notes played together. e.g. (G2B3e2) strums all three strings simultaneously." },
+  { sym: "-",      desc: "Space or beat separator. Adds blank column width between notes." },
+  { sym: "/",      desc: "Slide Up — shift to a higher pitch. e.g. G2/5" },
+  { sym: "\\",     desc: "Slide Down — shift to a lower pitch. e.g. G5\\2" },
+  { sym: "h",      desc: "Hammer-on — fret note with a tap-down motion. e.g. E1h2" },
+  { sym: "p",      desc: "Pull-off — fret note by pulling the finger away. e.g. E2p1" },
+  { sym: "~",      desc: "Vibrato — shake string for pitch variation. Always displays after fret. e.g. E4~ or ~E4 both display as 4~" },
+  { sym: "x",      desc: "Dead note — muted string, no fret needed. e.g. Ex displays as x on E string." },
+  { sym: "^",      desc: "Bend — push string to raise pitch. Always displays after fret. e.g. A5^ displays as 5^" },
+  { sym: "Prefix", desc: "Style symbols before a note apply to that note. e.g. hE2 = hammer onto E fret 2. The - clears any pending state." },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -422,11 +461,13 @@ export default function App() {
   const [selection, setSelection]       = useState({ start: 0, end: 0 });
 
 // Button input state
-const [pendingStyle, setPendingStyle] = useState("");
-const [pendingString, setPendingString] = useState(null);
-const [lastString, setLastString] = useState(null); // Option A chain memory
-const [chordMode, setChordMode] = useState(false);  // chord mode active
-const [chordBuffer, setChordBuffer] = useState(""); // building chord content
+const [pendingStyle, setPendingStyle]   = useState("");      // prefix style
+const [pendingSuffix, setPendingSuffix] = useState("");      // suffix style (~, ^)
+const [pendingMute, setPendingMute]     = useState(false);   // x pending
+const [pendingString, setPendingString] = useState(null);    // selected string
+const [lastString, setLastString]       = useState(null);    // chain memory
+const [chordMode, setChordMode]         = useState(false);
+const [chordBuffer, setChordBuffer]     = useState("");
 
   // Navigation: 0=Studio, 1=Library, 2=Glossary
   const [activeTab, setActiveTab]       = useState(0);
@@ -490,43 +531,104 @@ const [chordBuffer, setChordBuffer] = useState(""); // building chord content
   // ── Button handlers ───────────────────────────────────────────────────────
 
   const handleStyleBtn = useCallback((token) => {
-  if (chordMode) return; // blocked in chord mode
+  if (chordMode && token !== MUTE_SYMBOL) return; // only mute is allowed inside chord mode
 
   if (token === "(") {
     setChordMode(true);
     setChordBuffer("");
     setPendingStyle("");
+    setPendingSuffix("");
+    setPendingMute(false);
     setPendingString(null);
     return;
   }
-  if (token === ")") {
-    // Should not appear as active in chord mode, but safety catch
-    return;
-  }
+  if (token === ")") return;
+
   if (token === "-") {
     setPendingStyle("");
+    setPendingSuffix("");
+    setPendingMute(false);
     setPendingString(null);
-    setLastString(null); // dash clears chain memory
+    setLastString(null);
     insertToken("-");
     return;
   }
-  // Style prefix — toggle
+
+  if (token === MUTE_SYMBOL) {
+  if (chordMode) {
+    // In chord mode, mute requires a string already selected
+    if (!pendingString) return;
+    const label = labelsMap[pendingString] || pendingString[0];
+    setChordBuffer(prev => prev + label + "x");
+    setPendingString(null);
+    return;
+  }
+  // If string already selected, insert immediately
+  if (pendingString) {
+    const label = labelsMap[pendingString] || pendingString[0];
+    insertToken(label + "x");
+    setPendingString(null);
+    setPendingStyle("");
+    setPendingSuffix("");
+    setPendingMute(false);
+    setLastString(pendingString);
+    return;
+  }
+  // Otherwise store as pending mute
+  setPendingMute(prev => !prev);
+  setPendingSuffix("");
+  setPendingStyle("");
+  return;
+}
+
+  if (SUFFIX_SYMBOLS.includes(token)) {
+  // If a string is already selected, we still need a fret first — store as pending suffix
+  if (pendingString) {
+    setPendingSuffix(prev => prev === token ? "" : token);
+    return;
+  }
+  // If no string selected but there's a "last string" to attach to (chaining after a fret was just placed)
+  if (lastString) {
+    const label = labelsMap[lastString] || lastString[0];
+    insertToken(token); // appends suffix directly to the end of the last note already in input
+    return;
+  }
+  // Otherwise store as pending, waiting for string then fret
+  setPendingSuffix(prev => prev === token ? "" : token);
+  setPendingStyle("");
+  setPendingMute(false);
+  return;
+}
+
+  // Regular prefix style
   setPendingStyle(prev => prev === token ? "" : token);
+  setPendingSuffix("");
+  setPendingMute(false);
   setPendingString(null);
-}, [chordMode, insertToken]);
+}, [chordMode, chordBuffer, pendingString, labelsMap, insertToken, pendingMute]);
 
   const handleStringBtn = useCallback((stringKey) => {
   if (chordMode) {
-    // In chord mode, selecting a string just sets pending for fret
     setPendingString(stringKey);
     return;
   }
+
+  // Mute — insert immediately on string tap
+  if (pendingMute) {
+    const label = labelsMap[stringKey] || stringKey[0];
+    insertToken(label + "x");
+    setPendingMute(false);
+    setPendingString(null);
+    setLastString(stringKey);
+    return;
+  }
+
   if (pendingString === stringKey) {
     setPendingString(null);
   } else {
     setPendingString(stringKey);
   }
-}, [chordMode, pendingString]);
+}, [chordMode, pendingMute, pendingString, labelsMap, insertToken]);
 
  const handleChordClose = useCallback(() => {
   if (!chordMode) return;
@@ -545,18 +647,31 @@ const handleFretBtn = useCallback((fret) => {
     setPendingString(null);
     return;
   }
+
   const activeString = pendingString || lastString;
   if (!activeString) {
     insertToken(fret);
     return;
   }
+
   const label = labelsMap[activeString] || activeString[0];
-  const token = pendingStyle + label + fret;
+
+  let token;
+  if (pendingSuffix) {
+    // Suffix symbols always go after fret
+    token = label + fret + pendingSuffix;
+  } else {
+    // Prefix style goes before fret
+    token = pendingStyle + label + fret;
+  }
+
   insertToken(token);
   setPendingStyle("");
+  setPendingSuffix("");
+  setPendingMute(false);
   setPendingString(null);
   setLastString(activeString);
-}, [chordMode, pendingString, lastString, pendingStyle, labelsMap, insertToken]);
+}, [chordMode, pendingString, lastString, pendingStyle, pendingSuffix, labelsMap, insertToken]);
   
   // ── Clipboard / Share ─────────────────────────────────────────────────────
   const flashMsg = (msg) => { setCopyMsg(msg); setTimeout(() => setCopyMsg(""), 2000); };
@@ -666,20 +781,22 @@ const handleFretBtn = useCallback((fret) => {
     <Text style={[s.chipTxt, chordMode && s.chipTxtActive]}>)</Text>
   </TouchableOpacity>
 
-  {/* Other style buttons — disabled in chord mode */}
-  {STYLE_SYMBOLS.filter(s2 => s2.token !== "(" && s2.token !== ")").map(({ label, token }) => {
-    const isActive = pendingStyle === token;
-    return (
-      <TouchableOpacity
-        key={token + label}
-        style={[s.chipBtn, isActive && s.chipBtnActive, chordMode && { opacity: 0.3 }]}
-        onPress={() => handleStyleBtn(token)}
-        disabled={chordMode}
-      >
-        <Text style={[s.chipTxt, isActive && s.chipTxtActive]}>{label}</Text>
-      </TouchableOpacity>
-    );
-  })}
+  {/* Other style buttons — only x stays active in chord mode */}
+{STYLE_SYMBOLS.filter(s2 => s2.token !== "(" && s2.token !== ")").map(({ label, token }) => {
+  const isActive = pendingStyle === token;
+  const isMute = token === MUTE_SYMBOL;
+  const disabledInChord = chordMode && !isMute;
+  return (
+    <TouchableOpacity
+      key={token + label}
+      style={[s.chipBtn, isActive && s.chipBtnActive, disabledInChord && { opacity: 0.3 }]}
+      onPress={() => handleStyleBtn(token)}
+      disabled={disabledInChord}
+    >
+      <Text style={[s.chipTxt, isActive && s.chipTxtActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+})}
 </ScrollView>
 
         {/* ── String row ── */}
@@ -719,20 +836,31 @@ const handleFretBtn = useCallback((fret) => {
   <View style={s.pendingRow}>
     <Text style={[s.pendingTxt, { color: T.green }]}>
       🎵 Chord mode — building: ({chordBuffer})
-      {pendingString ? `  → tap fret for "${labelsMap[pendingString] || pendingString}"` : "  → tap a string"}
+      {pendingString
+        ? `  → tap fret for "${labelsMap[pendingString] || pendingString}"`
+        : "  → tap a string"}
     </Text>
     <TouchableOpacity onPress={() => { setChordMode(false); setChordBuffer(""); setPendingString(null); }}>
       <Text style={{ color: T.red, fontSize: 12, fontWeight: "700" }}>Cancel</Text>
     </TouchableOpacity>
   </View>
-) : (pendingStyle || pendingString) ? (
+) : (pendingStyle || pendingSuffix || pendingMute || pendingString) ? (
   <View style={s.pendingRow}>
     <Text style={[s.pendingTxt, { color: T.amber }]}>
-      {pendingStyle ? `Style: "${pendingStyle}"  ` : ""}
+      {pendingStyle  ? `Prefix: "${pendingStyle}"  ` : ""}
+      {pendingSuffix ? `Suffix: "${pendingSuffix}"  ` : ""}
+      {pendingMute   ? `Mute (x)  ` : ""}
       {pendingString ? `String: "${labelsMap[pendingString] || pendingString}"  ` : ""}
-      → {pendingString ? "tap a fret" : "tap a string"}
+      {pendingMute
+        ? "→ tap a string"
+        : pendingString
+          ? "→ tap a fret"
+          : "→ tap a string"}
     </Text>
-    <TouchableOpacity onPress={() => { setPendingStyle(""); setPendingString(null); }}>
+    <TouchableOpacity onPress={() => {
+      setPendingStyle(""); setPendingSuffix("");
+      setPendingMute(false); setPendingString(null);
+    }}>
       <Text style={{ color: T.red, fontSize: 12, fontWeight: "700" }}>Cancel</Text>
     </TouchableOpacity>
   </View>
