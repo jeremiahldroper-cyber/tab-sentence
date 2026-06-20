@@ -478,6 +478,7 @@ const [chordBuffer, setChordBuffer]     = useState("");
   const [showWrapModal, setShowWrapModal]       = useState(false);
   const [saveName, setSaveName]                 = useState("");
   const [saveNotes, setSaveNotes]               = useState("");
+  const [loadedTabId, setLoadedTabId] = useState(null); // tracks which saved tab is currently open, if any
 
   // Preview expand
   const [previewExpanded, setPreviewExpanded]   = useState(false);
@@ -690,27 +691,40 @@ const handleFretBtn = useCallback((fret) => {
 
   // ── Save / Load ───────────────────────────────────────────────────────────
   const saveCurrentTab = useCallback(() => {
-    if (!saveName.trim()) return;
-    const entry = {
-      id: Date.now().toString(),
-      name: saveName.trim(),
-      notes: saveNotes.trim(),
-      input,
-      tuningKey,
-      wrapAt,
-    };
-    setSavedTabs(prev => [entry, ...prev]);
-    setSaveName(""); setSaveNotes(""); setShowSaveModal(false);
-    flashMsg("✓ Saved!");
-  }, [saveName, saveNotes, input, tuningKey, wrapAt]);
+  if (!saveName.trim()) return;
+  const entry = {
+    id: Date.now().toString(),
+    name: saveName.trim(),
+    notes: saveNotes.trim(),
+    input,
+    tuningKey,
+    wrapAt,
+  };
+  setSavedTabs(prev => [entry, ...prev]);
+  setLoadedTabId(entry.id); // newly saved tab becomes the "loaded" one
+  setSaveName(""); setSaveNotes(""); setShowSaveModal(false);
+  flashMsg("✓ Saved!");
+}, [saveName, saveNotes, input, tuningKey, wrapAt]);
+
+const updateLoadedTab = useCallback(() => {
+  if (!loadedTabId) return;
+  setSavedTabs(prev => prev.map(t =>
+    t.id === loadedTabId
+      ? { ...t, input, tuningKey, wrapAt, notes: saveNotes.trim() || t.notes }
+      : t
+  ));
+  setShowSaveModal(false);
+  flashMsg("✓ Updated!");
+}, [loadedTabId, input, tuningKey, wrapAt, saveNotes]);
 
   const loadTab = useCallback((entry) => {
-    setInput(entry.input);
-    if (PRESETS[entry.tuningKey]) setTuningKey(entry.tuningKey);
-    if (entry.wrapAt !== undefined) setWrapAt(entry.wrapAt);
-    setActiveTab(0);
-    flashMsg("✓ Loaded!");
-  }, []);
+  setInput(entry.input);
+  if (PRESETS[entry.tuningKey]) setTuningKey(entry.tuningKey);
+  if (entry.wrapAt !== undefined) setWrapAt(entry.wrapAt);
+  setLoadedTabId(entry.id);
+  setActiveTab(0);
+  flashMsg("✓ Loaded!");
+}, []);
 
   const deleteTab = useCallback((id) => {
     Alert.alert("Delete Tab", "Remove this saved tab?", [
@@ -741,9 +755,9 @@ const handleFretBtn = useCallback((fret) => {
       <View style={s.card}>
         <View style={s.cardRow}>
           <Text style={[s.cardLabel, { color: T.amber }]}>Shorthand Input</Text>
-          <TouchableOpacity onPress={() => setInput("")} style={s.clearBtn}>
-            <Text style={s.clearBtnTxt}>✕ Clear</Text>
-          </TouchableOpacity>
+          <TouchableOpacity onPress={() => { setInput(""); setLoadedTabId(null); }} style={s.clearBtn}>
+  <Text style={s.clearBtnTxt}>✕ Clear</Text>
+</TouchableOpacity>
         </View>
 
         <TextInput
@@ -1019,40 +1033,78 @@ const handleFretBtn = useCallback((fret) => {
 
   // ── Modals ────────────────────────────────────────────────────────────────
 
-  const renderSaveModal = () => (
+  const renderSaveModal = () => {
+  const loadedTab = savedTabs.find(t => t.id === loadedTabId);
+  return (
     <Modal visible={showSaveModal} transparent animationType="fade">
       <View style={s.modalOverlay}>
         <View style={[s.modalBox, { backgroundColor: T.bgModal, borderColor: T.borderAccent }]}>
-          <Text style={[s.modalTitle, { color: T.text }]}>Save Tab to Library</Text>
-          <TextInput
-            style={[s.inputField, { marginTop: 8 }]}
-            value={saveName}
-            onChangeText={setSaveName}
-            placeholder="Tab title / song name"
-            placeholderTextColor={T.textHint}
-            autoFocus
-          />
-          <TextInput
-            style={[s.inputField, { marginTop: 8, minHeight: 50 }]}
-            value={saveNotes}
-            onChangeText={setSaveNotes}
-            placeholder="Notes (optional, e.g. played with overdrive)"
-            placeholderTextColor={T.textHint}
-            multiline
-          />
-          <View style={[s.cardRow, { marginTop: 12, gap: 8 }]}>
-            <TouchableOpacity style={[s.modalBtn, { backgroundColor: T.bgCard, borderWidth: 1, borderColor: T.border, flex: 1 }]}
-              onPress={() => { setShowSaveModal(false); setSaveName(""); setSaveNotes(""); }}>
-              <Text style={[s.modalBtnTxt, { color: T.textSecond }]}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[s.modalBtn, { backgroundColor: T.amber, flex: 1 }]} onPress={saveCurrentTab}>
-              <Text style={[s.modalBtnTxt, { color: T.amberText }]}>Save Tab</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={[s.modalTitle, { color: T.text }]}>
+            {loadedTab ? `Update "${loadedTab.name}"?` : "Save Tab to Library"}
+          </Text>
+
+          {loadedTab ? (
+            <>
+              <Text style={[s.settingDetail, { color: T.textSecond, marginTop: 4, marginBottom: 8 }]}>
+                This tab was loaded from your library. Update it, or save your changes as a brand new tab.
+              </Text>
+              <TextInput
+                style={[s.inputField, { minHeight: 50 }]}
+                value={saveNotes}
+                onChangeText={setSaveNotes}
+                placeholder="Notes (optional — leave blank to keep existing)"
+                placeholderTextColor={T.textHint}
+              />
+              <View style={[s.cardRow, { marginTop: 12, gap: 8 }]}>
+                <TouchableOpacity style={[s.modalBtn, { backgroundColor: T.bgCard, borderWidth: 1, borderColor: T.border, flex: 1 }]}
+                  onPress={() => { setShowSaveModal(false); setSaveNotes(""); }}>
+                  <Text style={[s.modalBtnTxt, { color: T.textSecond }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.modalBtn, { backgroundColor: T.amber, flex: 1 }]} onPress={updateLoadedTab}>
+                  <Text style={[s.modalBtnTxt, { color: T.amberText }]}>Update</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={[s.modalBtn, { backgroundColor: T.green, marginTop: 8 }]}
+                onPress={() => { setSaveName(""); setLoadedTabId(null); }}
+              >
+                <Text style={[s.modalBtnTxt, { color: T.greenText }]}>Save as New Tab Instead</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TextInput
+                style={[s.inputField, { marginTop: 8 }]}
+                value={saveName}
+                onChangeText={setSaveName}
+                placeholder="Tab title / song name"
+                placeholderTextColor={T.textHint}
+                autoFocus
+              />
+              <TextInput
+                style={[s.inputField, { marginTop: 8, minHeight: 50 }]}
+                value={saveNotes}
+                onChangeText={setSaveNotes}
+                placeholder="Notes (optional, e.g. played with overdrive)"
+                placeholderTextColor={T.textHint}
+                multiline
+              />
+              <View style={[s.cardRow, { marginTop: 12, gap: 8 }]}>
+                <TouchableOpacity style={[s.modalBtn, { backgroundColor: T.bgCard, borderWidth: 1, borderColor: T.border, flex: 1 }]}
+                  onPress={() => { setShowSaveModal(false); setSaveName(""); setSaveNotes(""); }}>
+                  <Text style={[s.modalBtnTxt, { color: T.textSecond }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.modalBtn, { backgroundColor: T.amber, flex: 1 }]} onPress={saveCurrentTab}>
+                  <Text style={[s.modalBtnTxt, { color: T.amberText }]}>Save Tab</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
       </View>
     </Modal>
   );
+};
 
   const renderTuningModal = () => (
     <Modal visible={showTuningModal} animationType="slide">
